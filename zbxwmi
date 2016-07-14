@@ -1,32 +1,37 @@
-#!/usr/bin/env python
-#
-
+#!/usr/bin/python2
 """
 zbxwmi : discovery and bulk checks of WMI items with Zabbix
-
 v0.1 : initial release
 v0.2 : added "get" action
-
+v0.3 :
+    - fixed stylings as per PEP8, renamed filter to flt (to avoid ambiguity with builtin filter())
+	- replace bad symbols (for zabbix JSON) - e.g. '[]'
+	- implemented conversion of WMI date format to zabbix unixtime format
 """
 
 import sys
+import re
 import json
 import logging
+import datetime
+import time
 import wmi_client_wrapper as wmi
 from zsend import ZSend
 from docopt import docopt
+
 
 class NullDevice():
     def write(self, s):
         pass
 
+
 def main():
 
-  usage="""
+    usage = """
 Usage:
-  zbxwmi [-d] get <host> <item> <class> [-f <filter>] [-z <server>] [-D <domain>] [-U <username>] [-P <password] [-o <logfile>] 
+  zbxwmi [-d] get <host> <item> <class> [-f <filter>] [-z <server>] [-D <domain>] [-U <username>] [-P <password] [-o <logfile>]
   zbxwmi [-d] (bulk|discover) <host> <keys> <items> <class> [-f <filter>] [-z <server>] [-D <domain>] [-U <username>] [-P <password] [-o <logfile>]
-  zbxwmi [-d] <host> <keys> <items> <class> [-f <filter>] [-z <server>] [-D <domain>] [-U <username>] [-P <password] [-o <logfile>] 
+  zbxwmi [-d] <host> <keys> <items> <class> [-f <filter>] [-z <server>] [-D <domain>] [-U <username>] [-P <password] [-o <logfile>]
   zbxwmi --help
   zbxwmi --version
 
@@ -45,109 +50,128 @@ Options:
   -D <domain>, --domain <domain>              The domain to use for authentication
                                               [default: DOMAIN]
   -U <username>, --username <username>        The username to use for authentication
-                                              [default: wmiuser] 
+                                              [default: wmiuser]
   -P <password>, --password <password>        The password to use for authentication
                                               [default: password]
   -d, --debug                                 Debug mode, be more verbose
   -o <logfile>, --output <logfile>            The log file to use
-
 """
 
-  args = docopt(usage, version="0.1")
+    args = docopt(usage, version="0.1")
 
-  # Set the log file
-  level = logging.CRITICAL 
-  if args['--debug']:
-    level = logging.DEBUG
-  elif args['--output']:
-    level = logging.INFO
-  else:
+    # Set the log file
     level = logging.CRITICAL
+    if args['--debug']:
+        level = logging.DEBUG
+    elif args['--output']:
+        level = logging.INFO
+    else:
+        level = logging.CRITICAL
 
-  if level:
-    logging.basicConfig(
-      filename=args['--output'],
-      format='%(asctime)s - %(levelname)s - zbxwmi[%(process)s]: %(message)s',
-      level=level
-    )
+    if level:
+        logging.basicConfig(
+            filename=args['--output'],
+            format='%(asctime)s - %(levelname)s - zbxwmi[%(process)s]: %(message)s',
+            level=level
+            )
 
-  # Extract the arguments
-  username = args['--username'] if args['--username'] else username
-  password = args['--password'] if args['--password'] else password
-  domain = args['--domain'] if args['--domain'] else domain
-  host = args['<host>']
-  keys = args['<keys>'].split(',') if args['<keys>'] else []
-  server = args['--zabbix']
-  items = args['<items>'].split(',') if args['<items>'] else args['<item>'].split(',')
-  cls = args['<class>']
-  filter = args['--filter']
+    # Extract the arguments
+    username = args['--username'] if args['--username'] else username
+    password = args['--password'] if args['--password'] else password
+    domain = args['--domain'] if args['--domain'] else domain
+    host = args['<host>']
+    keys = args['<keys>'].split(',') if args['<keys>'] else []
+    server = args['--zabbix']
+    items = args['<items>'].split(',') if args['<items>'] else args['<item>'].split(',')
+    cls = args['<class>']
+    flt = args['--filter']
 
-  if (args['get'] and len(items) <> 1):
-    logging.error("action 'get' requires only one item")
-    exit(1)
+    if (args['get'] and len(items) != 1):
+        logging.error("action 'get' requires only one item")
+        sys.exit(1)
 
-  # Construct the query
-  query = "SELECT " + ",".join(items + keys) + " FROM " + cls
-  if filter:
-    query = query + " WHERE " + filter
+    # Construct the query
+    query = "SELECT " + ",".join(items + keys) + " FROM " + cls
+    if flt:
+        query = query + " WHERE " + flt
 
-  # Run the query
-  logging.info("New query for host " + host + " : " + query)
-  wmic = wmi.WmiClientWrapper(
-    "%s\%s" % (domain, username),
-    password,
-    host,
-  )
-  try:
-    result = wmic.query(query)
-  except Exception, e:
-    logging.error("An error occured with WMI : " + str(e))
-    # print "An error occured with WMI."
-    exit(1)
+    # Run the query
+    logging.info("New query for host " + host + " : " + query)
+    wmic = wmi.WmiClientWrapper(
+        "%s\%s" % (domain, username),
+        password,
+        host,
+        )
+    try:
+        result = wmic.query(query)
+    except Exception, e:
+        logging.error("An error occured with WMI : " + str(e))
+        # print "An error occured with WMI."
+        sys.exit(1)
 
-  # What to do with the results ?
-  if args['get']:
-    print str(result[0][items[0]])
-  elif args['bulk']:
-    sendToZabbix(result, keys, host, server, args['--debug'])
-  elif args['discover']:
-    showJSON(result, keys)
-  else: # Discover + bulk
-    showJSON(result, keys)
-    sendToZabbix(result, keys, host, server, args['--debug'])
+    # processing result values
+    for dict_item in result:
+        for key in dict_item:
+            dict_item[key] = process_wmi_string(dict_item[key])
 
-  logging.info("Done")
-  
-def sendToZabbix(data, keys, host, server, verbose = False):
-  """
-  Bulk inserts data into Zabbix using zabbix_sender
-  """
-  
-  z = ZSend(server = server, verbose = verbose)
-  for eachItem in data:
-    value = eachItem[keys[0]]
-    [eachItem.pop(eachKey) for eachKey in keys]
-    for k in eachItem.keys():
-      z.add_data(host,"%s[%s]" % (k, value), eachItem[k])
-  
-  if not verbose:
-    sys.stderr = NullDevice()  # redirect the real STDERR
-  z.send(z.build_all())
-    
+    # What to do with the results ?
+    if args['get']:
+        print str(result[0][items[0]])
+    elif args['bulk']:
+        sendToZabbix(result, keys, host, server, args['--debug'])
+    elif args['discover']:
+        showJSON(result, keys)
+    else:  # Discover + bulk
+        showJSON(result, keys)
+        sendToZabbix(result, keys, host, server, args['--debug'])
+
+    logging.info("Done")
+
+
+def process_wmi_string(string):
+    # replace characters incompatible with zabbix - []
+    chars_to_replace = '[]'
+    for char in list(chars_to_replace):
+        string = string.replace(char, "_")
+
+    # if a value looks like WMI date (20120221192815.000000+180) then convert it to unixtime minus timezone
+    wmi_date_pattern = re.compile('\d{14}\.\d{6}\+\d{1,}')
+    wmi_date_yes = wmi_date_pattern.match(string)
+    if wmi_date_yes:
+        date_str, Null = string.split(".")
+        string = int(time.mktime(datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").timetuple()))
+        return string
+    return string
+
+
+def sendToZabbix(data, keys, host, server, verbose=False):
+    """
+    Bulk inserts data into Zabbix using zabbix_sender
+    """
+    z = ZSend(server=server, verbose=verbose)
+    for eachItem in data:
+        value = eachItem[keys[0]]
+        [eachItem.pop(eachKey) for eachKey in keys]
+        for k in eachItem.keys():
+            z.add_data(host, "%s[%s]" % (k, value), eachItem[k])
+
+    if not verbose:
+        sys.stderr = NullDevice()  # redirect the real STDERR
+    z.send(z.build_all())
+
+
 def showJSON(data, keys):
-  """
-  Display a JSON-formatted index for Zabbix LLD discovery
-  """
-
-  output = []
-  logging.info("Creating the JSON output for Zabbix LLD discovery")
-  for eachItem in data:
-    props = {}
-    for i,k in enumerate(keys):
-      props["{#WMIINDEX" + str(i) + "}"] =  eachItem[k]
-    output.append(dict(props))
-  print json.dumps({ 'data': output }, indent=4)
+    """
+    Display a JSON-formatted index for Zabbix LLD discovery
+    """
+    output = []
+    logging.info("Creating the JSON output for Zabbix LLD discovery")
+    for eachItem in data:
+        props = {}
+        for i, k in enumerate(keys):
+            props["{#WMIINDEX" + str(i) + "}"] = eachItem[k]
+        output.append(dict(props))
+    print json.dumps({'data': output})
 
 if __name__ == '__main__':
     main()
-

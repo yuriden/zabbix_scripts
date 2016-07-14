@@ -4,8 +4,8 @@ zbxwmi : discovery and bulk checks of WMI items with Zabbix
 v0.1 : initial release
 v0.2 : added "get" action
 v0.3 :  - fixed stylings as per PEP8, renamed filter to flt (to avoid ambiguity with builtin filter())
-	- replace bad symbols (for zabbix JSON) - e.g. '[]'
-	- implemented conversion of WMI date format to zabbix unixtime format
+        - replace bad symbols (for zabbix JSON) - e.g. '[]'
+        - implemented conversion of WMI date format to zabbix unixtime format
 """
 
 import sys
@@ -139,7 +139,6 @@ def process_wmi_string(string):
     if wmi_date_yes:
         date_str, Null = string.split(".")
         string = int(time.mktime(datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").timetuple()))
-        return string
     return string
 
 

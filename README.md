@@ -12,7 +12,7 @@ zbxwmi must be installed on a Zabbix server or proxy and depends on wmic.
 
 ### Installation
 * Create a Windows user with WMI permissions
-* Install wmic. It can be installed from rpmforge or compiled from source, http://dev.zenoss.org/svn/tags/wmi-1.3.14/
+* Install wmic. It can be installed from rpmforge (for example: yum install http://www6.atomicorp.com/channels/atomic/centos/7/x86_64/RPMS/wmi-1.3.14-4.el7.art.x86_64.rpm - CentOS 7) or compiled from source.
 * Clone this repository into /usr/lib/zabbix/externalscripts/
 * Make zabbix the owner of the zbxwmi script and add execute permissions
 * Install the dependencies :

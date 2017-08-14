@@ -6,6 +6,7 @@ v0.2 : added "get" action
 v0.3 :  - fixed stylings as per PEP8, renamed filter to flt (to avoid ambiguity with builtin filter())
         - replace bad symbols (for zabbix JSON) - e.g. '[]'
         - implemented conversion of WMI date format to zabbix unixtime format
+v0.4 : added "return unicode(str(string), 'unicode-escape')" for normal processing non-English output
 """
 
 import sys
@@ -18,7 +19,6 @@ import wmi_client_wrapper as wmi
 from zsend import ZSend
 from docopt import docopt
 
-
 class NullDevice():
     def write(self, s):
         pass
@@ -26,6 +26,9 @@ class NullDevice():
 
 def main():
 
+    username = "USER"
+    password = "PASSWORD"
+    domain = "DOMAIN"
     usage = """
 Usage:
   zbxwmi [-d] get <host> <item> <class> [-f <filter>] [-z <server>] [-D <domain>] [-U <username>] [-P <password] [-o <logfile>]
@@ -55,7 +58,6 @@ Options:
   -d, --debug                                 Debug mode, be more verbose
   -o <logfile>, --output <logfile>            The log file to use
 """
-
     args = docopt(usage, version="0.1")
 
     # Set the log file
@@ -75,9 +77,6 @@ Options:
             )
 
     # Extract the arguments
-    username = args['--username'] if args['--username'] else username
-    password = args['--password'] if args['--password'] else password
-    domain = args['--domain'] if args['--domain'] else domain
     host = args['<host>']
     keys = args['<keys>'].split(',') if args['<keys>'] else []
     server = args['--zabbix']
@@ -99,7 +98,7 @@ Options:
     wmic = wmi.WmiClientWrapper(
         "%s\%s" % (domain, username),
         password,
-        host,
+	host,
         )
     try:
         result = wmic.query(query)
@@ -126,21 +125,21 @@ Options:
 
     logging.info("Done")
 
-
 def process_wmi_string(string):
-    # replace characters incompatible with zabbix - []
+    #replace characters incompatible with zabbix - []
     chars_to_replace = '[]'
     for char in list(chars_to_replace):
-        string = string.replace(char, "_")
+        string = str(string).replace(char, "_")
 
-    # if a value looks like WMI date (20120221192815.000000+180) then convert it to unixtime minus timezone
+    # if a value looks like WMI date (20120221192815.000000+180) then convert it to unixtime minus timezone    
     wmi_date_pattern = re.compile('\d{14}\.\d{6}\+\d{1,}')
     wmi_date_yes = wmi_date_pattern.match(string)
     if wmi_date_yes:
         date_str, Null = string.split(".")
         string = int(time.mktime(datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").timetuple()))
-    return string
 
+
+    return unicode(str(string), 'unicode-escape')
 
 def sendToZabbix(data, keys, host, server, verbose=False):
     """
